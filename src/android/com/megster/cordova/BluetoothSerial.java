@@ -2,6 +2,7 @@ package com.megster.cordova;
 
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
 import android.util.Log;
@@ -24,6 +25,14 @@ import java.util.Set;
  */
 public class BluetoothSerial extends CordovaPlugin {
 
+	//nwags variable
+	public static double pos;
+	public static double xmax=400.0;
+	public static double ymax=200.0;
+	public static double zmax=200.0;
+	public static double amax=24.0;
+	public static boolean power=true;
+	
     // actions
     private static final String LIST = "list";
     private static final String CONNECT = "connect";
@@ -38,11 +47,20 @@ public class BluetoothSerial extends CordovaPlugin {
     private static final String IS_ENABLED = "isEnabled";
     private static final String IS_CONNECTED = "isConnected";
     private static final String CLEAR = "clear";
+    
+    //nwags-actions
+    private static final String JOG = "Jog";
+    private static final String JOG_SUBSCRIBE = "jogsubscribe";
+    private static final String JOG_UNSUBSCRIBE = "jogunsubscribe";
 
     // callbacks
     private CallbackContext connectCallback;
     private CallbackContext dataAvailableCallback;
-
+    
+    //nwags-callbacks
+    private CallbackContext jogDataCallback;
+    
+    
     private BluetoothAdapter bluetoothAdapter;
     private BluetoothSerialService bluetoothSerialService;
 
@@ -156,6 +174,19 @@ public class BluetoothSerial extends CordovaPlugin {
             buffer.setLength(0);
             callbackContext.success();
 
+        } else if (action.equals(JOG)) { //nwags-action
+        	
+        	jog(args, callbackContext);
+        	
+        } else if (action.equals(JOG_SUBSCRIBE)) { //nwags-action
+        	jogDataCallback = callbackContext;
+        	
+        	PluginResult result = new PluginResult(PluginResult.Status.NO_RESULT);
+            result.setKeepCallback(true);
+            callbackContext.sendPluginResult(result);
+        } else if (action.equals(JOG_UNSUBSCRIBE)) { //nwags-action
+        	jogDataCallback = null;
+            callbackContext.success();
         } else {
 
             validAction = false;
@@ -216,9 +247,13 @@ public class BluetoothSerial extends CordovaPlugin {
              switch (msg.what) {
                  case MESSAGE_READ:
                     buffer.append((String)msg.obj);
-
+                    
                     if (dataAvailableCallback != null) {
                         sendDataToSubscriber();
+                    }
+                    
+                    if(jogDataCallback != null){ //nwags
+                    	sendJogDataToSubscriber();
                     }
                     break;
                  case MESSAGE_STATE_CHANGE:
@@ -302,4 +337,162 @@ public class BluetoothSerial extends CordovaPlugin {
         }
         return data;
     }
+
+    //nwags private methods
+    private void sendJogDataToSubscriber() {
+    	LOG.d(TAG, "sendJogDataToSubscriber called");
+    	String data = readUntil("\n");
+    	String jsonStr = "";
+    	if(data != null && data.length() > 0){
+    		try {
+    			
+    			JSONObject json = new JSONObject(data);
+    			if (json.has("r")) {
+    				jsonStr = processBody(json.getJSONObject("r"));
+    			}else if (json.has("sr")) {
+    				jsonStr = processStatusReport(json.getJSONObject("sr"));
+    			}
+    			
+    		} catch(Exception e){
+    			if(e.getMessage()!=null)
+    				Log.e(TAG, e.getMessage());
+    			
+    		}
+    		
+    		PluginResult result = new PluginResult(PluginResult.Status.OK, jsonStr);
+            result.setKeepCallback(true);
+            jogDataCallback.sendPluginResult(result);
+
+            sendJogDataToSubscriber();
+    	}
+    }
+    
+    private String processBody(JSONObject json) throws JSONException {
+    	LOG.d(TAG, "processBody called");
+    	String result = "";
+    	if(json.has("sr"))
+    		result = processStatusReport(json.getJSONObject("sr"));
+    	return result;
+    }
+    
+    private String processStatusReport(JSONObject sr) throws JSONException{
+    	LOG.d(TAG, "processStatusReport called");
+    	String result = "";
+    	JSONObject jResult = new JSONObject();
+    	if (sr.has("posx"))
+    		pos = sr.getDouble("posx");
+    		pos = pos/xmax;
+    		jResult.put("x", pos);
+		if (sr.has("posy"))
+			pos = sr.getDouble("posy");
+			pos = pos/ymax;
+			jResult.put("y", pos);
+		if (sr.has("posz"))
+			pos = sr.getDouble("posz");
+			pos = pos/zmax;
+			jResult.put("z", pos);
+		if (sr.has("posa"))
+			pos = sr.getDouble("posa");
+			pos = pos/amax;
+			jResult.put("a", pos);
+		if (sr.has("stat")){
+			switch (sr.getInt("stat")){
+			case 0:
+				jResult.put("listening", 0);
+				break;
+			case 1:
+				jResult.put("listening", 1);
+				break;
+			case 2:
+				jResult.put("listening", 0);
+				break;
+			case 3:
+				jResult.put("listening", 1);
+				break;
+			case 4:
+				jResult.put("listening", 0);
+				break;
+			case 5:
+				jResult.put("listening", 0);
+				break;
+			case 6:
+				jResult.put("listening", 0);
+				break;
+			case 7:
+				jResult.put("listening", 0);
+				break;
+			case 8:
+				jResult.put("listening", 0);
+				break;
+			case 9:
+				jResult.put("listening", 0);
+				break;
+			}
+		}
+		result = jResult.toString();
+		LOG.d(TAG, "result: "+result);
+    	return result;
+    }
+    
+    private void jog(CordovaArgs args, CallbackContext callbackContext) throws JSONException {
+    	JSONObject jsonObj = args.getJSONObject(0);
+    	
+    	if(jsonObj.has("reset")) {
+    		LOG.d(TAG, "reset");
+    		byte[] rst = {0x18};
+    		bluetoothSerialService.write(rst);
+            callbackContext.success();
+            return;
+    	}
+    	if(jsonObj.has("stop")) {
+    		LOG.d(TAG, "stop");
+    		bluetoothSerialService.write("!%\n".getBytes());
+            callbackContext.success();
+            return;
+    	}
+    	if(jsonObj.has("power")) {
+    		LOG.d(TAG, "power");
+    		if(jsonObj.getBoolean("power")){
+    			bluetoothSerialService.write("$me\n".getBytes());
+    			bluetoothSerialService.write("{\"1pm\":\"1\"}\n".getBytes());
+    			bluetoothSerialService.write("{\"2pm\":\"1\"}\n".getBytes());
+    			bluetoothSerialService.write("{\"3pm\":\"1\"}\n".getBytes());
+    			bluetoothSerialService.write("{\"4pm\":\"1\"}\n".getBytes());
+    			power = true;
+                callbackContext.success();
+                
+    		}else{
+    			bluetoothSerialService.write("$md\n".getBytes());
+    			power = false;
+                callbackContext.success();
+    		}
+    	}
+    	double gogo = 0.0;
+    	String gogoStr = "";
+    	String gocode = "{\"gc\":\"g90 g0 ";//\"}\n";
+    	if(jsonObj.has("x")) {
+    		gogo = jsonObj.getDouble("x")*xmax;
+    		gogoStr = "x"+String.valueOf(gogo);
+    		gocode+=gogoStr;
+    	}
+    	if(jsonObj.has("y")) {
+    		gogo = jsonObj.getDouble("y")*ymax;
+    		gogoStr = "y"+String.valueOf(gogo);
+    		gocode+=gogoStr;
+    	}
+    	if(jsonObj.has("z")) {
+    		gogo = jsonObj.getDouble("z")*zmax;
+    		gogoStr = "z"+String.valueOf(gogo);
+    		gocode+=gogoStr;
+    	}
+    	if(jsonObj.has("a")) {
+    		gogo = jsonObj.getDouble("a")*amax;
+    		gogoStr = "a"+String.valueOf(gogo);
+    		gocode+=gogoStr;
+    	}
+    	gocode+="\"}\n";
+    	bluetoothSerialService.write(gocode.getBytes());
+        callbackContext.success();
+    }
+
 }
