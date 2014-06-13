@@ -66,5 +66,18 @@ module.exports = {
     readRSSI: function (success, failure) {
         cordova.exec(success, failure, "BluetoothSerial", "readRSSI", []);        
     }
-
+    
+    //added for simple jog commands
+    jog: function (jogcommand, success, failure) {
+		cordova.exec(success, failure, "BluetoothSerial", "jog", [jogcommand]);
+	}
+	
+	jogsubscribe: function (success, failure) {
+		cordova.exec(success, failure, "BluetoothSerial", "jogsubscribe", []);
+	}
+	
+	jogunsubscribe: function (success, failure) {
+		cordova.exec(success, failure, "BluetoothSerial", "jogunsubscribe", []);
+	}
+    
 };
